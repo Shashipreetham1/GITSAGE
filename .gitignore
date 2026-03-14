@@ -82,4 +82,4 @@ coverage/
 # ===========================
 # Playbook Data (local generated files)
 # ===========================
-server/playbooks/*/contributors/
+server/playbooks/

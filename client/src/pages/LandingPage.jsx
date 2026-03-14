@@ -76,8 +76,9 @@ const features = [
   },
 ];
 
-function LandingPage({ user, onSubmit, isLoading }) {
+function LandingPage({ user, canUseGithubSelector, onSubmit, isLoading }) {
   const [useManualInput, setUseManualInput] = useState(false);
+  const showRepoSelector = user && canUseGithubSelector && !useManualInput;
 
   return (
     <div className="min-h-screen">
@@ -110,13 +111,15 @@ function LandingPage({ user, onSubmit, isLoading }) {
             {/* Subheadline */}
             <p className="text-lg md:text-xl max-w-2xl mx-auto mb-10 leading-relaxed" style={{ color: '#475569' }}>
               {user
-                ? 'Select a repository from your GitHub account or enter any public repo URL to get started.'
+                ? canUseGithubSelector
+                  ? 'Select a repository from your GitHub account or enter any public repo URL to get started.'
+                  : 'Enter any public GitHub repository URL to get started.'
                 : 'Get intelligent health summaries, activity insights, and blocker detection for any GitHub repository.'}
             </p>
 
             {/* Input Section */}
             <div className="max-w-xl mx-auto">
-              {user && !useManualInput ? (
+              {showRepoSelector ? (
                 <RepoSelector
                   onSubmit={onSubmit}
                   isLoading={isLoading}
@@ -125,7 +128,7 @@ function LandingPage({ user, onSubmit, isLoading }) {
               ) : (
                 <div>
                   <RepoInput onSubmit={onSubmit} isLoading={isLoading} />
-                  {user && (
+                  {user && canUseGithubSelector && useManualInput && (
                     <button
                       onClick={() => setUseManualInput(false)}
                       className="mt-4 text-sm hover:text-slate-700 transition-colors underline underline-offset-4"
@@ -211,6 +214,7 @@ function LandingPage({ user, onSubmit, isLoading }) {
 
 LandingPage.propTypes = {
   user: PropTypes.object,
+  canUseGithubSelector: PropTypes.bool,
   onSubmit: PropTypes.func.isRequired,
   isLoading: PropTypes.bool,
 };

@@ -5,6 +5,7 @@
 
 import express from 'express';
 import crypto from 'crypto';
+import { createClient } from '@supabase/supabase-js';
 
 const router = express.Router();
 
@@ -12,6 +13,53 @@ const router = express.Router();
 function getClientId() { return process.env.GITHUB_CLIENT_ID; }
 function getClientSecret() { return process.env.GITHUB_CLIENT_SECRET; }
 function getClientUrl() { return process.env.CLIENT_URL || 'http://localhost:5173'; }
+
+function sessionCookieOptions() {
+  const isProduction = process.env.NODE_ENV === 'production';
+  return {
+    httpOnly: true,
+    sameSite: isProduction ? 'none' : 'lax',
+    secure: isProduction,
+  };
+}
+
+function regenerateSession(req) {
+  return new Promise((resolve, reject) => {
+    req.session.regenerate((err) => {
+      if (err) return reject(err);
+      return resolve();
+    });
+  });
+}
+
+let supabaseAdmin = null;
+function getSupabaseAdmin() {
+  if (supabaseAdmin) return supabaseAdmin;
+
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!supabaseUrl || !serviceRoleKey) {
+    return null;
+  }
+
+  supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
+  });
+
+  return supabaseAdmin;
+}
+
+async function upsertUserProfile(adminClient, profile) {
+  try {
+    await adminClient.from('profiles').upsert(profile, { onConflict: 'id' });
+  } catch (error) {
+    console.warn('Profile upsert skipped:', error.message);
+  }
+}
 
 // Generate a stable webhook secret if not set
 let webhookSecret = null;
@@ -97,14 +145,17 @@ router.get('/auth/github/callback', async (req, res) => {
 
     const userData = await userResponse.json();
 
-    // Store in session
-    req.session.githubToken = accessToken;
-    req.session.user = {
+    const nextSessionUser = {
       login: userData.login,
       avatar_url: userData.avatar_url,
       name: userData.name || userData.login,
       id: userData.id
     };
+
+    // Rotate session ID after auth to reduce session fixation risk
+    await regenerateSession(req);
+    req.session.githubToken = accessToken;
+    req.session.user = nextSessionUser;
 
     console.log(`User ${userData.login} authenticated via GitHub OAuth`);
 
@@ -122,10 +173,77 @@ router.get('/auth/github/callback', async (req, res) => {
  * Returns the currently authenticated user or null
  */
 router.get('/auth/user', (req, res) => {
-  if (req.session?.user && req.session?.githubToken) {
+  if (req.session?.user) {
     return res.json({ user: req.session.user, authenticated: true });
   }
   res.json({ user: null, authenticated: false });
+});
+
+/**
+ * POST /api/auth/session
+ * Verifies Supabase access token and stores user in express session
+ */
+router.post('/auth/session', async (req, res) => {
+  const { accessToken, providerToken, provider } = req.body || {};
+
+  if (!accessToken) {
+    return res.status(400).json({ error: 'Missing access token' });
+  }
+
+  const adminClient = getSupabaseAdmin();
+  if (!adminClient) {
+    return res.status(500).json({
+      error: 'Supabase not configured on server (SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY missing)',
+    });
+  }
+
+  try {
+    const { data, error } = await adminClient.auth.getUser(accessToken);
+    if (error || !data?.user) {
+      return res.status(401).json({ error: 'Invalid Supabase token' });
+    }
+
+    const supabaseUser = data.user;
+    const metadata = supabaseUser.user_metadata || {};
+    const login =
+      metadata.user_name ||
+      metadata.preferred_username ||
+      (supabaseUser.email ? supabaseUser.email.split('@')[0] : null) ||
+      supabaseUser.id;
+
+    const sessionUser = {
+      id: supabaseUser.id,
+      login,
+      name: metadata.full_name || metadata.name || login,
+      avatar_url: metadata.avatar_url || metadata.picture || '',
+      email: supabaseUser.email || metadata.email || '',
+      provider: provider || supabaseUser.app_metadata?.provider || 'unknown',
+    };
+
+    await regenerateSession(req);
+    req.session.user = sessionUser;
+
+    if (providerToken && sessionUser.provider === 'github') {
+      req.session.githubToken = providerToken;
+    } else if (sessionUser.provider !== 'github') {
+      delete req.session.githubToken;
+    }
+
+    await upsertUserProfile(adminClient, {
+      id: supabaseUser.id,
+      email: sessionUser.email,
+      login: sessionUser.login,
+      full_name: sessionUser.name,
+      avatar_url: sessionUser.avatar_url,
+      provider: sessionUser.provider,
+      last_login_at: new Date().toISOString(),
+    });
+
+    res.json({ authenticated: true, user: sessionUser });
+  } catch (syncError) {
+    console.error('Supabase session sync error:', syncError.message);
+    res.status(500).json({ error: 'Failed to sync authentication session' });
+  }
 });
 
 /**
@@ -244,6 +362,7 @@ router.post('/auth/logout', (req, res) => {
     if (err) {
       return res.status(500).json({ error: 'Failed to logout' });
     }
+    res.clearCookie('gitsage.sid', sessionCookieOptions());
     console.log(`User ${user} logged out`);
     res.json({ success: true });
   });

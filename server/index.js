@@ -16,6 +16,12 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3003;
 const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173';
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+
+if (IS_PRODUCTION) {
+  // Required when app is behind a reverse proxy (Render/Railway/Vercel adapters, etc.)
+  app.set('trust proxy', 1);
+}
 
 // Middleware
 app.use(cors({
@@ -27,14 +33,16 @@ app.use(express.json({ limit: '2mb' }));
 
 // Session middleware (before routes)
 app.use(session({
+  name: 'gitsage.sid',
   secret: process.env.SESSION_SECRET || 'gitsage-session-secret',
   resave: false,
   saveUninitialized: false,
+  rolling: true,
   cookie: {
     maxAge: 24 * 60 * 60 * 1000, // 24 hours
     httpOnly: true,
-    sameSite: 'lax',
-    secure: false // set to true in production with HTTPS
+    sameSite: IS_PRODUCTION ? 'none' : 'lax',
+    secure: IS_PRODUCTION // HTTPS only in production
   }
 }));
 

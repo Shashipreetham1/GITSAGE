@@ -34,6 +34,7 @@
 
 - **Frontend**: React + Vite, Tailwind CSS, React Query, @dnd-kit, Recharts
 - **Backend**: Node.js + Express
+- **Authentication**: Supabase Auth (GitHub + Google OAuth)
 - **AI**: Anthropic Claude API
 - **Data Source**: GitHub REST API
 - **Real-time**: Server-Sent Events (SSE)
@@ -146,15 +147,43 @@ gitsage/
 | `GITHUB_CLIENT_SECRET` | GitHub OAuth App Secret | For auth |
 | `GITHUB_WEBHOOK_SECRET` | Webhook verification secret | For webhooks |
 | `SESSION_SECRET` | Session encryption secret | Recommended |
+| `SUPABASE_URL` | Supabase project URL | Yes (server auth sync) |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key | Yes (server auth sync) |
 | `PORT` | Server port (default: 3001) | No |
 | `CLIENT_URL` | Client URL for CORS (default: http://localhost:5173) | No |
 
-## GitHub OAuth Setup
+### Client Environment Variables (`client/.env`)
 
-1. Go to GitHub Settings > Developer settings > OAuth Apps
-2. Create a new OAuth App
-3. Set Authorization callback URL to `http://localhost:3001/api/auth/github/callback`
-4. Copy Client ID and Client Secret to your `.env` file
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `VITE_SUPABASE_URL` | Supabase project URL | Yes |
+| `VITE_SUPABASE_ANON_KEY` | Supabase anon public key | Yes |
+
+## Supabase OAuth Setup (GitHub + Google)
+
+1. In Supabase dashboard, open **Authentication > Providers**.
+2. Enable **GitHub** and **Google** providers.
+3. Add callback URL in each provider as:
+   `https://<your-project-ref>.supabase.co/auth/v1/callback`
+4. Set frontend redirect URL to your app origin (for local: `http://localhost:5173`).
+5. Add these env vars:
+   - `client/.env`: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`
+   - `server/.env`: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
+
+Optional profile table (used to store minimal user profile metadata):
+
+```sql
+create table if not exists public.profiles (
+  id uuid primary key,
+  email text,
+  login text,
+  full_name text,
+  avatar_url text,
+  provider text,
+  last_login_at timestamptz,
+  updated_at timestamptz default now()
+);
+```
 
 ## Deployment
 

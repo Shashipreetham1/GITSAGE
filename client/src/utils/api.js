@@ -275,6 +275,27 @@ export async function getAuthUser() {
 }
 
 /**
+ * Sync Supabase auth session with backend express-session
+ * @param {{accessToken: string, providerToken?: string, provider?: string, user?: object}} payload
+ * @returns {Promise<{authenticated: boolean, user: object}>}
+ */
+export async function syncAuthSession(payload) {
+  const response = await fetch(`${API_BASE}/auth/session`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify(payload),
+  });
+
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.error || 'Failed to sync auth session');
+  }
+
+  return data;
+}
+
+/**
  * Get the authenticated user's repositories
  * @returns {Promise<Array>} List of repos
  */

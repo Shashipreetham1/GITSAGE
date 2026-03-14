@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import Sidebar from './components/Sidebar';
 import LandingPage from './pages/LandingPage';
+import LoginPage from './pages/LoginPage';
 import OverviewPage from './pages/OverviewPage';
 import InsightsPage from './pages/InsightsPage';
 import ActivityPage from './pages/ActivityPage';
@@ -12,16 +13,17 @@ import LiveEventToast from './components/LiveEventToast';
 import LoadingState from './components/LoadingState';
 import ErrorDisplay from './components/ErrorDisplay';
 import RepoInput from './components/RepoInput';
-import { fetchPulseData, getAuthUser, subscribeToUpdates } from './utils/api';
+import { fetchPulseData, subscribeToUpdates } from './utils/api';
+import { useAuth } from './context/AuthContext';
 
 function App() {
   // Core state
   const [pulseData, setPulseData] = useState(null);
-  const [user, setUser] = useState(null);
-  const [authChecked, setAuthChecked] = useState(false);
   const [aiPending, setAiPending] = useState(false);
   const [liveEvents, setLiveEvents] = useState([]);
   const [playbookRefreshKey, setPlaybookRefreshKey] = useState(0);
+
+  const { user, loading: authLoading, error: authError, signInWithProvider, signOut } = useAuth();
   
   // UI state
   const [activeView, setActiveView] = useState('overview');
@@ -100,16 +102,6 @@ function App() {
     };
   }, [pulseData?.repoData?.meta?.owner, pulseData?.repoData?.meta?.name]);
 
-  // Check auth state on mount
-  useEffect(() => {
-    getAuthUser()
-      .then(data => {
-        if (data.authenticated) setUser(data.user);
-      })
-      .catch(() => {})
-      .finally(() => setAuthChecked(true));
-  }, []);
-
   // Mutation for fetching pulse data
   const pulseMutation = useMutation({
     mutationFn: ({ repoUrl, forceRefresh }) => fetchPulseData(repoUrl, forceRefresh),
@@ -142,10 +134,14 @@ function App() {
     setActiveView('overview');
   };
 
-  const handleLogout = () => {
-    setUser(null);
+  const handleLogout = async () => {
+    await signOut();
     setPulseData(null);
     pulseMutation.reset();
+  };
+
+  const handleLogin = async (provider) => {
+    await signInWithProvider(provider);
   };
 
   const handleAnalyzeCommit = useCallback((sha) => {
@@ -166,6 +162,20 @@ function App() {
   const summary = pulseData?.summary || null;
   const summaryError = pulseData?.summaryError || null;
   const hasRepo = !!repoData;
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <LoadingState />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <LoginPage onLogin={handleLogin} error={authError} />;
+  }
+
+  const canUseGithubSelector = user.provider === 'github';
 
   // Render the appropriate page content
   const renderPageContent = () => {
@@ -221,6 +231,7 @@ function App() {
       {!hasRepo && !pulseMutation.isPending && !pulseMutation.isError && (
         <LandingPage
           user={user}
+          canUseGithubSelector={canUseGithubSelector}
           onSubmit={handleSubmit}
           isLoading={pulseMutation.isPending}
         />
